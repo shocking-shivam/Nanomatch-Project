@@ -1,4 +1,8 @@
-\build
+build/
+bin/
+googletest/
 .vscode/
-\googletest
-/Generate_Orders/orders.txt
+*.o
+*.txt
+*.csv
+*.txt
