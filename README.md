@@ -36,7 +36,7 @@ Struct padding and false sharing can evict critical pointers from the L1 cache.
 
 - **CPU:** AMD Ryzen 7 7435HS
 - **RAM:** 12 GB
-- **OS:** Ubuntu 26.04 LTS / WSL2
+- **OS:** Ubuntu 24.04 LTS / WSL2
 - **Kernel:** 6.6.114.1-microsoft-standard-WSL2
 - **Compiler:** GCC
 - **Build:** Release `-O3` `-march=native`
@@ -51,8 +51,9 @@ Measured using `rdtsc` hardware cycle counters processing 490,000 synthetic orde
 | **p90** | 4448 ns | **3556 ns** | 1.25x |
 | **p99** | 30027 ns | **28193 ns** | 1.06x |
 | **Min** | 20 ns | **20 ns** | 1.00x |
+| **Throughput** | ~0.60 M/s | **~0.82 M/s** | 1.37x |
 
-*Note: SPSC background logging added a negligible ~1.02x overhead to the p50 hot path.*
+*Note: SPSC background logging added a negligible ~1.02x overhead to the p50 hot path. Throughput derived from p50 median latency (1e9 ns/s ÷ latency).*
 
 ## Reproducing Benchmarks
 
