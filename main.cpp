@@ -1,38 +1,49 @@
-#include "./Generate_Orders/GenerateOrders.hpp"
-#include "./Process_Orders/OrderPipeline.hpp"
-#include "./Limit_Order_Book/Book.hpp"
-#include "./Limit_Order_Book/Limit.hpp"
-#include "./Limit_Order_Book/Order.hpp"
 #include <iostream>
-#include <vector>
 #include <chrono>
+#include <fstream>
+#include "Limit_Order_Book/Book.hpp"
+#include "Process_Orders/OrderPipeline.hpp"
 
 int main() {
     Book* book = new Book();
-
     OrderPipeline orderPipeline(book);
 
-    // GenerateOrders generateOrders(book);
+    // 1. Safety check for initial orders
+    std::ifstream initialCheck("Generate_Orders/initialOrders.txt");
+    if (!initialCheck) {
+        std::cerr << "Error: Could not open Generate_Orders/initialOrders.txt!" << std::endl;
+        delete book;
+        return 1;
+    }
+    initialCheck.close();
 
-    // generateOrders.createInitialOrders(10000, 300);
+    // 2. Safety check for main orders
+    std::ifstream ordersCheck("Orders.txt");
+    if (!ordersCheck) {
+        std::cerr << "Error: Could not open Orders.txt!" << std::endl;
+        delete book;
+        return 1;
+    }
+    ordersCheck.close();
 
-    orderPipeline.processOrdersFromFile("./initialOrders.txt");
+    std::cout << "Files found. Starting Ultra-Low Latency Engine..." << std::endl;
 
-    // generateOrders.createOrders(5000000);
+    // Process initial state
+    orderPipeline.processOrdersFromFile("Generate_Orders/initialOrders.txt");
 
-
-    // Start measuring time
+    // Start High-Frequency Timer
     auto start = std::chrono::high_resolution_clock::now();
 
-    orderPipeline.processOrdersFromFile("./Orders.txt");
+    // Process massive order file
+    orderPipeline.processOrdersFromFile("Orders.txt");
 
-    // Stop measuring time
+    // Stop High-Frequency Timer
     auto stop = std::chrono::high_resolution_clock::now();
 
-    // Calculate the duration
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-
-    std::cout << "Time taken to process orders: " << duration.count() << " milliseconds" << std::endl;
+    // Calculate in MICROSECONDS
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    
+    std::cout << "Time taken to process orders: " << duration.count() << " microseconds" << std::endl;
 
     delete book;
     return 0;
