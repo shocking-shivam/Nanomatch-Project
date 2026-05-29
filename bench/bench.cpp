@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -19,7 +20,7 @@
 
 namespace {
 
-constexpr size_t kWorkloadSize = 500000;
+constexpr size_t kDefaultWorkloadSize = 490000;
 constexpr size_t kWarmupOps = 10000;
 constexpr int kPriceMean = 300;
 constexpr int kPriceSigma = 30;
@@ -317,6 +318,48 @@ BenchStats run_workload_with_logger(const std::string& name,
     return compute_stats(name, std::move(cycles), ghz);
 }
 
+double throughput_mps(const BenchStats& stats) {
+    if (stats.count == 0 || stats.cycles.empty() || stats.ghz <= 0.0) {
+        return 0.0;
+    }
+
+    uint64_t cycle_sum = 0;
+    for (uint64_t c : stats.cycles) {
+        cycle_sum += c;
+    }
+
+    const double elapsed_seconds =
+        static_cast<double>(cycle_sum) / (stats.ghz * 1e9);
+    if (elapsed_seconds <= 0.0) {
+        return 0.0;
+    }
+
+    return (static_cast<double>(stats.count) / elapsed_seconds) / 1000000.0;
+}
+
+struct BenchConfig {
+    size_t msgs = kDefaultWorkloadSize;
+    std::string out_csv = "docs/bench.csv";
+    std::string hist_csv = "docs/hist.csv";
+};
+
+BenchConfig parse_args(int argc, char** argv) {
+    BenchConfig cfg;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--msgs" && i + 1 < argc) {
+            cfg.msgs = static_cast<size_t>(std::strtoull(argv[++i], nullptr, 10));
+        } else if (arg == "--out-csv" && i + 1 < argc) {
+            cfg.out_csv = argv[++i];
+        } else if (arg == "--hist" && i + 1 < argc) {
+            cfg.hist_csv = argv[++i];
+        } else {
+            std::cerr << "Unknown argument: " << arg << '\n';
+        }
+    }
+    return cfg;
+}
+
 void print_comparison_table(const BenchStats& baseline,
                             const BenchStats& slab,
                             const BenchStats& slabLogged) {
@@ -346,6 +389,7 @@ void print_comparison_table(const BenchStats& baseline,
     row("p50", baseline.p50_ns, slab.p50_ns, slabLogged.p50_ns);
     row("p90", baseline.p90_ns, slab.p90_ns, slabLogged.p90_ns);
     row("p99", baseline.p99_ns, slab.p99_ns, slabLogged.p99_ns);
+    row("throughput (M/s)", throughput_mps(baseline), throughput_mps(slab), throughput_mps(slabLogged));
     row("min", baseline.min_ns, slab.min_ns, slabLogged.min_ns);
     row("max", baseline.max_ns, slab.max_ns, slabLogged.max_ns);
 
@@ -355,13 +399,15 @@ void print_comparison_table(const BenchStats& baseline,
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    const BenchConfig cfg = parse_args(argc, argv);
+
     std::cout << "Calibrating TSC frequency...\n";
     const double ghz = detect_ghz();
     std::cout << "Detected CPU: " << ghz << " GHz\n";
 
     OrderGenerator generator(0xC0FFEE);
-    const std::vector<SyntheticOrder> orders = generator.generate(kWorkloadSize);
+    const std::vector<SyntheticOrder> orders = generator.generate(cfg.msgs);
     std::cout << "Generated " << orders.size() << " synthetic orders\n";
 
     std::cout << "Running warmup + benchmark (BookBaseline / STL alloc)...\n";
@@ -377,10 +423,18 @@ int main() {
 
     print_comparison_table(baselineStats, slabStats, slabLoggedStats);
 
-    std::filesystem::create_directories("docs");
-    write_percentile_csv("docs/bench.csv", baselineStats, slabStats, slabLoggedStats);
-    write_histogram_csv("docs/hist.csv", baselineStats, slabStats, slabLoggedStats, ghz);
+    const auto parent = std::filesystem::path(cfg.out_csv).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent);
+    }
+    const auto hist_parent = std::filesystem::path(cfg.hist_csv).parent_path();
+    if (!hist_parent.empty()) {
+        std::filesystem::create_directories(hist_parent);
+    }
 
-    std::cout << "\nWrote docs/bench.csv and docs/hist.csv\n";
+    write_percentile_csv(cfg.out_csv, baselineStats, slabStats, slabLoggedStats);
+    write_histogram_csv(cfg.hist_csv, baselineStats, slabStats, slabLoggedStats, ghz);
+
+    std::cout << "\nWrote " << cfg.out_csv << " and " << cfg.hist_csv << '\n';
     return 0;
 }
