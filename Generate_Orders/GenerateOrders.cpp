@@ -10,6 +10,7 @@
 #include <random>
 #include <algorithm>
 #include <functional>
+#include <numeric> // Required for std::partial_sum
 
 GenerateOrders::GenerateOrders(Book* _book) : book(_book), gen(rd()) {}
 
@@ -32,7 +33,6 @@ void GenerateOrders::addLimit()
     std::normal_distribution<> limitPriceDist(300, 50);
     std::uniform_int_distribution<> buyOrSellDist(0, 1);
 
-
     int shares = sharesDist(gen);
     bool buyOrSell = buyOrSellDist(gen);
     int limitPrice;
@@ -40,12 +40,12 @@ void GenerateOrders::addLimit()
     if (buyOrSell)
     {
         do {
-            limitPrice = limitPriceDist(gen);
-        } while (limitPrice >= book->getLowestSell()->getLimitPrice());  
+            limitPrice = (int)limitPriceDist(gen);
+        } while (book->getLowestSell() != nullptr && limitPrice >= book->getLowestSell()->getLimitPrice());  
     } else {
         do {
-            limitPrice = limitPriceDist(gen);
-        } while (limitPrice <= book->getHighestBuy()->getLimitPrice());  
+            limitPrice = (int)limitPriceDist(gen);
+        } while (book->getHighestBuy() != nullptr && limitPrice <= book->getHighestBuy()->getLimitPrice());  
     }
 
     file << "AddLimit " << orderId << " " << buyOrSell << " " << shares << " " << limitPrice << std::endl;
@@ -87,12 +87,12 @@ void GenerateOrders::modifyLimit()
     if (buyOrSell)
     {
         do {
-            limitPrice = limitPriceDist(gen);
-        } while (limitPrice >= book->getLowestSell()->getLimitPrice());  
+            limitPrice = (int)limitPriceDist(gen);
+        } while (book->getLowestSell() != nullptr && limitPrice >= book->getLowestSell()->getLimitPrice());  
     } else {
         do {
-            limitPrice = limitPriceDist(gen);
-        } while (limitPrice <= book->getHighestBuy()->getLimitPrice());  
+            limitPrice = (int)limitPriceDist(gen);
+        } while (book->getHighestBuy() != nullptr && limitPrice <= book->getHighestBuy()->getLimitPrice());  
     }
     file << "ModifyLimit " << orderId << " " << shares << " " << limitPrice << std::endl;
     book->modifyLimitOrder(orderId, shares, limitPrice);
@@ -126,7 +126,6 @@ void GenerateOrders::addStop()
     std::normal_distribution<> stopPriceDist(book->getHighestBuy()->getLimitPrice(), 50);
     std::uniform_int_distribution<> buyOrSellDist(0, 1);
 
-
     int shares = sharesDist(gen);
     bool buyOrSell = buyOrSellDist(gen);
 
@@ -134,12 +133,12 @@ void GenerateOrders::addStop()
     if (buyOrSell)
     {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice <= book->getLowestSell()->getLimitPrice());  
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getLowestSell() != nullptr && stopPrice <= book->getLowestSell()->getLimitPrice());  
     } else {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice >= book->getHighestBuy()->getLimitPrice());  
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getHighestBuy() != nullptr && stopPrice >= book->getHighestBuy()->getLimitPrice());  
     }
 
     file << "AddStop " << orderId << " " << buyOrSell << " " << shares << " " << stopPrice << std::endl;
@@ -181,12 +180,12 @@ void GenerateOrders::modifyStop()
     if (buyOrSell)
     {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice <= book->getLowestSell()->getLimitPrice());  
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getLowestSell() != nullptr && stopPrice <= book->getLowestSell()->getLimitPrice());  
     } else {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice >= book->getHighestBuy()->getLimitPrice());  
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getHighestBuy() != nullptr && stopPrice >= book->getHighestBuy()->getLimitPrice());  
     }
     file << "ModifyStop " << orderId << " " << shares << " " << stopPrice << std::endl;
     book->modifyStopOrder(orderId, shares, stopPrice);
@@ -199,7 +198,6 @@ void GenerateOrders::addStopLimit()
     std::uniform_int_distribution<> limitPriceDist(1, 5);
     std::uniform_int_distribution<> buyOrSellDist(0, 1);
 
-
     int shares = sharesDist(gen);
     bool buyOrSell = buyOrSellDist(gen);
 
@@ -208,13 +206,13 @@ void GenerateOrders::addStopLimit()
     if (buyOrSell)
     {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice <= book->getLowestSell()->getLimitPrice());  
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getLowestSell() != nullptr && stopPrice <= book->getLowestSell()->getLimitPrice());  
         limitPrice = stopPrice + limitPriceDist(gen);
     } else {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice >= book->getHighestBuy()->getLimitPrice());
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getHighestBuy() != nullptr && stopPrice >= book->getHighestBuy()->getLimitPrice());
         limitPrice = stopPrice - limitPriceDist(gen);
     }
 
@@ -259,13 +257,13 @@ void GenerateOrders::modifyStopLimit()
     if (buyOrSell)
     {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice <= book->getLowestSell()->getLimitPrice());  
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getLowestSell() != nullptr && stopPrice <= book->getLowestSell()->getLimitPrice());  
         limitPrice = stopPrice + limitPriceDist(gen);
     } else {
         do {
-            stopPrice = stopPriceDist(gen);
-        } while (stopPrice >= book->getHighestBuy()->getLimitPrice());  
+            stopPrice = (int)stopPriceDist(gen);
+        } while (book->getHighestBuy() != nullptr && stopPrice >= book->getHighestBuy()->getLimitPrice());  
         limitPrice = stopPrice - limitPriceDist(gen);
     }
     file << "ModifyStopLimit " << orderId << " " << shares << " " << limitPrice << " " << stopPrice << std::endl;
@@ -274,19 +272,18 @@ void GenerateOrders::modifyStopLimit()
 
 void GenerateOrders::createOrders(int numberOfOrders)
 {
-    // Open a file named "orders.txt" for writing
-    file.open("C:/Users/benja/Documents/Limit_order_book/orders.txt");
+    // CORRECTED: Opens file in the current working directory
+    file.open("orders.txt");
 
     if (!file.is_open()) {
-        std::cerr << "Error opening file for writing!" << std::endl;
+        std::cerr << "Error opening orders.txt for writing!" << std::endl;
         return;
     }
 
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
     // Define the probabilities and actions
-    std::vector<double> probabilities = {0.025, 0, 0.195, 0.295, 0.025, 0, 0.12, 0.12, 0, 0.12, 0.12};
-    // std::vector<double> probabilities = {0.05, 0, 0.2, 0.3, 0, 0, 0.15, 0.15, 0, 0, 0.15};
+    std::vector<double> probabilities = {0.025, 0.1, 0.195, 0.295, 0.025, 0.05, 0.1, 0.1, 0.03, 0.03, 0.05};
     std::vector<std::function<void()>> actions = {
         std::bind(&GenerateOrders::market, this),
         std::bind(&GenerateOrders::addLimit, this),
@@ -304,7 +301,7 @@ void GenerateOrders::createOrders(int numberOfOrders)
     // Calculate the cumulative probabilities
     std::partial_sum(probabilities.begin(), probabilities.end(), probabilities.begin());
 
-    for (size_t i = 1; i < numberOfOrders + 1; i++)
+    for (size_t i = 1; i < (size_t)numberOfOrders + 1; i++)
     {
         // Generate a random number between 0 and 1 
         double randNum = dis(gen);
@@ -316,34 +313,23 @@ void GenerateOrders::createOrders(int numberOfOrders)
         int selectedAction = std::distance(probabilities.begin(), it);
 
         // Perform the selected action
-        if (selectedAction < probabilities.size()) {
+        if (selectedAction < (int)probabilities.size()) {
             actions[selectedAction]();
-
-            // if (i%100000 == 0)
-            // {
-            //     std::cout << "-------------------------------------" << std::endl;
-            //     std::cout << "Number of orders done: " << i << std::endl;
-                
-            //     std::cout << "Highest Stop Sell: " << book->getHighestStopSell()->getLimitPrice() << ", Lowest Stop Buy: " << book->getLowestStopBuy()->getLimitPrice() << std::endl;
-            //     std::cout << "Lowest Sell: " << book->getLowestSell()->getLimitPrice() << ", Highest Buy: " << book->getHighestBuy()->getLimitPrice() << std::endl;
-            //     book->printOrderBook();
-            // }
-            
         } else {
             std::cerr << "Error: No action selected!" << std::endl;
         }
     }
     file.close();
-    std::cout << "Orders written to Orders.txt successfully!" << std::endl;
+    std::cout << "Orders written to orders.txt successfully!" << std::endl;
 }
 
 void GenerateOrders::createInitialOrders(int numberOfOrders, int centreOfBook)
 {
-    // Open a file named "initialOrders.txt" for writing
-    std::ofstream file("C:/Users/benja/Documents/Limit_order_book/initialOrders.txt");
+    // CORRECTED: Opens file in the current working directory
+    std::ofstream initialFile("initialOrders.txt");
 
-    if (!file.is_open()) {
-        std::cerr << "Error opening file for writing!" << std::endl;
+    if (!initialFile.is_open()) {
+        std::cerr << "Error opening initialOrders.txt for writing!" << std::endl;
         return;
     }
 
@@ -356,11 +342,11 @@ void GenerateOrders::createInitialOrders(int numberOfOrders, int centreOfBook)
     // Adding initial limit orders
     for (int order = 1; order <= numberOfOrders; ++order) {
         int shares = sharesDist(gen);
-        int limitPrice = limitPriceDist(gen);
+        int limitPrice = (int)limitPriceDist(gen);
         bool buyOrSell = limitPrice < centreOfBook;
 
         // Writing order to the file
-        file << "AddLimit " << order << " " << buyOrSell << " " << shares << " " << limitPrice << std::endl;
+        initialFile << "AddLimit " << order << " " << buyOrSell << " " << shares << " " << limitPrice << std::endl;
     }
 
     std::uniform_int_distribution<> stopLimitPriceDist(1, 5);
@@ -369,13 +355,13 @@ void GenerateOrders::createInitialOrders(int numberOfOrders, int centreOfBook)
     // Adding initial stop and stop limit orders
     for (int order = numberOfOrders + 1; order <= numberOfOrders * 1.1; ++order) {
         int shares = sharesDist(gen);
-        int stopPrice = limitPriceDist(gen);
+        int stopPrice = (int)limitPriceDist(gen);
         bool buyOrSell = stopPrice > centreOfBook;
         bool stopOrStopLimit = stopOrStopLimitDist(gen);
 
         if (stopOrStopLimit)
         {
-            file << "AddStop " << order << " " << buyOrSell << " " << shares << " " << stopPrice << std::endl;
+            initialFile << "AddStop " << order << " " << buyOrSell << " " << shares << " " << stopPrice << std::endl;
         } else {
             int limitPrice;
             if (buyOrSell)
@@ -384,14 +370,12 @@ void GenerateOrders::createInitialOrders(int numberOfOrders, int centreOfBook)
             } else {
                 limitPrice = stopPrice - stopLimitPriceDist(gen);
             }
-            file << "AddStopLimit " << order << " " << buyOrSell << " " << shares << " " << limitPrice << " " << stopPrice << std::endl;
+            initialFile << "AddStopLimit " << order << " " << buyOrSell << " " << shares << " " << limitPrice << " " << stopPrice << std::endl;
         }
-        
     }
 
-
     // Close the file
-    file.close();
+    initialFile.close();
 
     std::cout << "Orders written to initialOrders.txt successfully!" << std::endl;
 }

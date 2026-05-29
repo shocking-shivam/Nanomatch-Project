@@ -6,9 +6,9 @@ class Limit;
 class Order {
 private:
     int idNumber;
-    bool buyOrSell;
     int shares;
     int limit;
+    bool buyOrSell;
     Order *nextOrder;
     Order *prevOrder;
     Limit *parentLimit;
@@ -31,5 +31,7 @@ public:
 
     void print() const;
 };
+
+static_assert(sizeof(Order) <= 64, "Order exceeds cache line");
 
 #endif

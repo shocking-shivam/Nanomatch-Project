@@ -1,6 +1,8 @@
 #ifndef BOOK_HPP
 #define BOOK_HPP
 
+#include <new>
+#include "mempool.hpp"
 #include <unordered_map>
 #include <vector>
 #include <random>
@@ -11,6 +13,9 @@ class Order;
 
 class Book {
 private:
+    lob::SlabPool<Order> orderPool_;
+    lob::SlabPool<Limit> limitPool_;
+
     Limit *buyTree;
     Limit *sellTree;
     Limit *lowestSell;
@@ -61,6 +66,8 @@ private:
     Limit* lr_rotateStop(Limit* limit);
     Limit* rl_rotateStop(Limit* limit);
     Limit* balanceStop(Limit* limit);
+
+    template <bool IsBuy> void matchOrder(int id, int shares, int limitPrice);
 
 public:
     Book();
