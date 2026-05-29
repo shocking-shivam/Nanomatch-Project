@@ -411,7 +411,7 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchStopMap(vec[i])->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            throw std::runtime_error("Error: vector is error");
+            std::cerr << "Error in vector\n"; return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
@@ -424,7 +424,7 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchStopMap(vec[i])->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            throw std::runtime_error("Error: Vector is error");
+            std::cerr << "Error in vector\n"; return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
@@ -437,7 +437,7 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchLimitMaps(vec[i], true)->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            throw std::runtime_error("Error: vector is error");
+            std::cerr << "Error in vector\n"; return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
@@ -450,7 +450,7 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchLimitMaps(vec[i], false)->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            throw std::runtime_error("Error: Vector is error");
+            std::cerr << "Error in vector\n"; return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
