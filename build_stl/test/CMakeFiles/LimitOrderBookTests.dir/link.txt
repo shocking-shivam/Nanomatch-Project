@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/LimitOrderBookTests.dir/link.d CMakeFiles/LimitOrderBookTests.dir/LimitOrderBookTests.cpp.o CMakeFiles/LimitOrderBookTests.dir/ExampleOrdersTests.cpp.o CMakeFiles/LimitOrderBookTests.dir/spsc_tests.cpp.o -o LimitOrderBookTests  ../lib/libgtest_main.a ../libLimitOrderBook_lib.a -lpthread ../lib/libgtest.a

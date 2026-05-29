@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -s -Wl,--dependency-file=CMakeFiles/LimitOrderBook.dir/link.d CMakeFiles/LimitOrderBook.dir/main.cpp.o -o LimitOrderBook  libLimitOrderBook_lib.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libLimitOrderBook_lib.a CMakeFiles/LimitOrderBook_lib.dir/Limit_Order_Book/Book.cpp.o CMakeFiles/LimitOrderBook_lib.dir/Limit_Order_Book/Limit.cpp.o CMakeFiles/LimitOrderBook_lib.dir/Limit_Order_Book/Order.cpp.o CMakeFiles/LimitOrderBook_lib.dir/Process_Orders/OrderPipeline.cpp.o CMakeFiles/LimitOrderBook_lib.dir/Generate_Orders/GenerateOrders.cpp.o
+/usr/bin/ranlib libLimitOrderBook_lib.a

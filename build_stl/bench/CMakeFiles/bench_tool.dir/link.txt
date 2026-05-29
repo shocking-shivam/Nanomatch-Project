@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/bench_tool.dir/link.d CMakeFiles/bench_tool.dir/bench.cpp.o CMakeFiles/bench_tool.dir/baseline_adapter.cpp.o -o bench_tool  liblob_stl.a liblob_pool.a

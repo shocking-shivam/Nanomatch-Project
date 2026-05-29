@@ -1,0 +1,2 @@
+/usr/bin/ar qc liblob_pool.a CMakeFiles/lob_pool.dir/__/Limit_Order_Book/Book.cpp.o CMakeFiles/lob_pool.dir/__/Limit_Order_Book/Limit.cpp.o CMakeFiles/lob_pool.dir/__/Limit_Order_Book/Order.cpp.o
+/usr/bin/ranlib liblob_pool.a

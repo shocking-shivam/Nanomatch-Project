@@ -32,21 +32,59 @@ Struct padding and false sharing can evict critical pointers from the L1 cache.
 * Utilizes `mmap` with `MADV_SEQUENTIAL` to map binary exchange data directly into virtual memory.
 * Bypasses userspace copying entirely, achieving parsing speeds in excess of **95 Million messages per second**.
 
+## Test Environment
+
+- **CPU:** AMD Ryzen 7 7435HS
+- **RAM:** 12 GB
+- **OS:** Ubuntu 26.04 LTS / WSL2
+- **Kernel:** 6.6.114.1-microsoft-standard-WSL2
+- **Compiler:** GCC
+- **Build:** Release `-O3` `-march=native`
+
 ## 📊 Performance Benchmark
 
-Measured using `rdtsc` hardware cycle counters on an Intel CPU @ 3.09GHz processing 490,000 synthetic orders:
+Measured using `rdtsc` hardware cycle counters processing 490,000 synthetic orders:
 
 | Metric | Baseline (`std::map` + `new`) | NanoMatch (Slab Pool) | Speedup |
 | :--- | :--- | :--- | :--- |
 | **p50 (Median)** | 1673 ns | **1222 ns** | 1.37x |
 | **p90** | 4448 ns | **3556 ns** | 1.25x |
+| **p99** | 30027 ns | **28193 ns** | 1.06x |
 | **Min** | 20 ns | **20 ns** | 1.00x |
 
-*Note: SPSC Background Logging added a negligible ~1.02x overhead to the p50 hot path.*
+*Note: SPSC background logging added a negligible ~1.02x overhead to the p50 hot path.*
 
-## 📈 Flame Graph Profiling
-*Run `sudo perf record -F 99 -g -- ./build/bench/bench_tool` to recreate.*
-See `docs/flamegraph.svg` to visually verify the eradication of `__libc_malloc` overhead from the execution path.
+## Reproducing Benchmarks
+
+Pin the benchmark to a single core and write CSV outputs:
+
+```bash
+taskset -c 0 ./build/bench/bench_tool --msgs 490000 --out-csv docs/bench.csv --hist docs/hist.csv
+```
+
+Capture a flame graph with `perf` (requires `sudo`):
+
+```bash
+sudo perf record -F 99 -g --call-graph dwarf -- taskset -c 0 ./build/bench/bench_tool --msgs 490000 --out-csv docs/bench.csv --hist docs/hist.csv
+sudo perf script | stackcollapse-perf.pl | flamegraph.pl > docs/flame_after.svg
+```
+
+For a baseline comparison against STL allocation, rebuild with `-DUSE_SLAB_POOL=OFF` and record again:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SLAB_POOL=OFF
+cmake --build build --target bench_tool -j
+sudo perf record -F 99 -g --call-graph dwarf -- taskset -c 0 ./build/bench/bench_tool --msgs 490000 --out-csv docs/bench.csv --hist docs/hist.csv
+sudo perf script | stackcollapse-perf.pl | flamegraph.pl > docs/flame_before.svg
+```
+
+### Flame Graph Profiling
+
+![Before pool](docs/flame_before.svg)
+
+![After pool](docs/flame_after.svg)
+
+The slab-pool build removes OS-level `__libc_malloc` from the matching hot path: flame graphs before pooling show heap allocation dominating samples, while the pooled build shifts time into book logic and cache-friendly order/limit access.
 
 ## 🛠️ Build Instructions
 Requires a compiler that supports C++17. Built and tested on Linux (Ubuntu/WSL2).

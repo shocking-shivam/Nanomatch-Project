@@ -1,0 +1,12 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/shivam/Nanomatch/build_stl/cmake_install.cmake",
+		"/home/shivam/Nanomatch/build_stl/googletest/cmake_install.cmake",
+		"/home/shivam/Nanomatch/build_stl/googletest/googlemock/cmake_install.cmake",
+		"/home/shivam/Nanomatch/build_stl/googletest/googletest/cmake_install.cmake",
+		"/home/shivam/Nanomatch/build_stl/test/cmake_install.cmake",
+		"/home/shivam/Nanomatch/build_stl/bench/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
