@@ -2,6 +2,10 @@
 #include "Limit.hpp"
 #include <iostream>
 
+#ifdef USE_STL_ALLOC
+namespace baseline {
+#endif
+
 Order::Order(int _idNumber, bool _buyOrSell, int _shares, int _limit)
     : idNumber(_idNumber), buyOrSell(_buyOrSell), shares(_shares), limit(_limit), 
     nextOrder(nullptr), prevOrder(nullptr), parentLimit(nullptr) {}
@@ -99,3 +103,7 @@ void Order::print() const
     << ", Order Limit: " << limit 
     << std::endl;
 }
+
+#ifdef USE_STL_ALLOC
+} // namespace baseline
+#endif

@@ -1,38 +1,190 @@
 #include "Book.hpp"
 #include "Order.hpp"
 #include "Limit.hpp"
+#include "../Limit_Order_Book/rdtsc.hpp"
 #include <iostream>
 #include <algorithm>
 #include <random>
 #include <iterator>
 
-Book::Book() : buyTree(nullptr), sellTree(nullptr), lowestSell(nullptr), highestBuy(nullptr), 
-            stopBuyTree(nullptr), stopSellTree(nullptr), highestStopSell(nullptr), lowestStopBuy(nullptr){}
+#ifdef USE_STL_ALLOC
+namespace baseline {
+#endif
+
+namespace book_impl {
+constexpr int kOrderSlotMask = (1 << 17) - 1;
+constexpr int kLimitSlots = 1024;
+}  // namespace book_impl
+
+using book_impl::kLimitSlots;
+using book_impl::kOrderSlotMask;
+
+Order* Book::allocateOrder(int id, bool buyOrSell, int shares, int limitPrice) {
+#ifdef USE_STL_ALLOC
+    return new Order(id, buyOrSell, shares, limitPrice);
+#else
+    return new (orderPool_.alloc()) Order(id, buyOrSell, shares, limitPrice);
+#endif
+}
+
+void Book::deallocateOrder(Order* order) {
+#ifdef USE_STL_ALLOC
+    delete order;
+#else
+    order->~Order();
+    orderPool_.free(order);
+#endif
+}
+
+Limit* Book::allocateLimit(int limitPrice, bool buyOrSell) {
+#ifdef USE_STL_ALLOC
+    return new Limit(limitPrice, buyOrSell);
+#else
+    return new (limitPool_.alloc()) Limit(limitPrice, buyOrSell);
+#endif
+}
+
+void Book::deallocateLimit(Limit* limit) {
+#ifdef USE_STL_ALLOC
+    delete limit;
+#else
+    limit->~Limit();
+    limitPool_.free(limit);
+#endif
+}
+
+void Book::storeOrder(int orderId, Order* order) {
+#ifndef USE_STL_ALLOC
+    orderArr_[orderId & kOrderSlotMask] = order;
+#else
+    orderMap[orderId] = order;
+#endif
+}
+
+Order* Book::findOrder(int orderId) const {
+#ifndef USE_STL_ALLOC
+    return orderArr_[orderId & kOrderSlotMask];
+#else
+    const auto it = orderMap.find(orderId);
+    return it == orderMap.end() ? nullptr : it->second;
+#endif
+}
+
+void Book::clearOrder(int orderId) {
+#ifndef USE_STL_ALLOC
+    orderArr_[orderId & kOrderSlotMask] = nullptr;
+#else
+    orderMap.erase(orderId);
+#endif
+}
+
+Limit* Book::findLimit(int limitPrice, bool buyOrSell) const {
+#ifndef USE_STL_ALLOC
+    if (limitPrice < 0 || limitPrice >= kLimitSlots) {
+        return nullptr;
+    }
+    return buyOrSell ? buyLimitArr_[limitPrice] : sellLimitArr_[limitPrice];
+#else
+    const auto& limits = buyOrSell ? limitBuyMap : limitSellMap;
+    const auto it = limits.find(limitPrice);
+    return it == limits.end() ? nullptr : it->second;
+#endif
+}
+
+bool Book::hasLimit(int limitPrice, bool buyOrSell) const {
+    return findLimit(limitPrice, buyOrSell) != nullptr;
+}
+
+void Book::setLimit(int limitPrice, bool buyOrSell, Limit* limit) {
+#ifndef USE_STL_ALLOC
+    if (buyOrSell) {
+        buyLimitArr_[limitPrice] = limit;
+    } else {
+        sellLimitArr_[limitPrice] = limit;
+    }
+#else
+    if (buyOrSell) {
+        limitBuyMap[limitPrice] = limit;
+    } else {
+        limitSellMap[limitPrice] = limit;
+    }
+#endif
+}
+
+void Book::clearLimit(int limitPrice, bool buyOrSell) {
+#ifndef USE_STL_ALLOC
+    if (buyOrSell) {
+        buyLimitArr_[limitPrice] = nullptr;
+    } else {
+        sellLimitArr_[limitPrice] = nullptr;
+    }
+#else
+    if (buyOrSell) {
+        limitBuyMap.erase(limitPrice);
+    } else {
+        limitSellMap.erase(limitPrice);
+    }
+#endif
+}
+
+Book::Book(TradeLogger* logger)
+    : buyTree(nullptr),
+      sellTree(nullptr),
+      lowestSellPtr_(nullptr),
+      highestBuyPtr_(nullptr),
+      stopBuyTree(nullptr),
+      stopSellTree(nullptr),
+      highestStopSell(nullptr),
+      lowestStopBuy(nullptr),
+      logger_(logger)
+{
+#ifndef USE_STL_ALLOC
+    buyLimitArr_.fill(nullptr);
+    sellLimitArr_.fill(nullptr);
+    orderArr_.fill(nullptr);
+#endif
+}
 
 // When deleting the book need to ensure all used memory is freed
 Book::~Book()
 {
+#ifndef USE_STL_ALLOC
+    for (Order* order : orderArr_) {
+        if (order != nullptr) {
+            deallocateOrder(order);
+        }
+    }
+
+    for (Limit* limit : buyLimitArr_) {
+        if (limit != nullptr) {
+            deallocateLimit(limit);
+        }
+    }
+
+    for (Limit* limit : sellLimitArr_) {
+        if (limit != nullptr) {
+            deallocateLimit(limit);
+        }
+    }
+#else
     for (auto& [id, order] : orderMap) {
-        order->~Order();
-        orderPool_.free(order);
+        deallocateOrder(order);
     }
     orderMap.clear();
 
     for (auto& [limitPrice, limit] : limitBuyMap) {
-        limit->~Limit();
-        limitPool_.free(limit);
+        deallocateLimit(limit);
     }
     limitBuyMap.clear();
 
     for (auto& [limitPrice, limit] : limitSellMap) {
-        limit->~Limit();
-        limitPool_.free(limit);
+        deallocateLimit(limit);
     }
     limitSellMap.clear();
+#endif
 
     for (auto& [stopPrice, stopLevel] : stopMap) {
-        stopLevel->~Limit();
-        limitPool_.free(stopLevel);
+        deallocateLimit(stopLevel);
     }
     stopMap.clear();
 }
@@ -49,12 +201,12 @@ Limit* Book::getSellTree() const
 
 Limit* Book::getLowestSell() const
 {
-    return lowestSell;
+    return lowestSellPtr_;
 }
 
 Limit* Book::getHighestBuy() const
 {
-    return highestBuy;
+    return highestBuyPtr_;
 }
 
 Limit* Book::getStopBuyTree() const
@@ -93,48 +245,52 @@ void Book::matchOrder(int id, int shares, int limitPrice)
     AVLTreeBalanceCount = 0;
 
     if constexpr (IsBuy) {
-        while (lowestSell != nullptr && shares != 0 && lowestSell->getLimitPrice() <= limitPrice)
+        while (lowestSellPtr_ != nullptr && shares != 0 && lowestSellPtr_->getLimitPrice() <= limitPrice)
         {
-            if (shares <= lowestSell->getTotalVolume())
+            if (shares <= lowestSellPtr_->getTotalVolume())
             {
                 marketOrderHelper(id, true, shares);
                 shares = 0;
             } else {
-                shares -= lowestSell->getTotalVolume();
-                marketOrderHelper(id, true, lowestSell->getTotalVolume());
+                shares -= lowestSellPtr_->getTotalVolume();
+                marketOrderHelper(id, true, lowestSellPtr_->getTotalVolume());
             }
         }
     } else {
-        while (highestBuy != nullptr && shares != 0 && highestBuy->getLimitPrice() >= limitPrice)
+        while (highestBuyPtr_ != nullptr && shares != 0 && highestBuyPtr_->getLimitPrice() >= limitPrice)
         {
-            if (shares <= highestBuy->getTotalVolume())
+            if (shares <= highestBuyPtr_->getTotalVolume())
             {
                 marketOrderHelper(id, false, shares);
                 shares = 0;
             } else {
-                shares -= highestBuy->getTotalVolume();
-                marketOrderHelper(id, false, highestBuy->getTotalVolume());
+                shares -= highestBuyPtr_->getTotalVolume();
+                marketOrderHelper(id, false, highestBuyPtr_->getTotalVolume());
             }
         }
     }
 
     if (shares != 0)
     {
-        Order* newOrder = new (orderPool_.alloc()) Order(id, IsBuy, shares, limitPrice);
-        orderMap.emplace(id, newOrder);
+        Order* newOrder = allocateOrder(id, IsBuy, shares, limitPrice);
+        storeOrder(id, newOrder);
 
         if constexpr (IsBuy) {
-            if (limitBuyMap.find(limitPrice) == limitBuyMap.end())
-            {
-                addLimit(limitPrice, true);
+            if (limitPrice >= 0 && limitPrice < kLimitSlots) {
+                if (!hasLimit(limitPrice, true))
+                {
+                    addLimit(limitPrice, true);
+                }
+                findLimit(limitPrice, true)->append(newOrder);
             }
-            limitBuyMap.at(limitPrice)->append(newOrder);
         } else {
-            if (limitSellMap.find(limitPrice) == limitSellMap.end())
-            {
-                addLimit(limitPrice, false);
+            if (limitPrice >= 0 && limitPrice < kLimitSlots) {
+                if (!hasLimit(limitPrice, false))
+                {
+                    addLimit(limitPrice, false);
+                }
+                findLimit(limitPrice, false)->append(newOrder);
             }
-            limitSellMap.at(limitPrice)->append(newOrder);
         }
         // limitOrders.insert(newOrder);
     } else {
@@ -168,8 +324,7 @@ void Book::cancelLimitOrder(int orderId)
             }
         deleteFromOrderMap(orderId);
         // limitOrders.erase(order);
-        order->~Order();
-        orderPool_.free(order);
+        deallocateOrder(order);
     }
 }
 
@@ -188,13 +343,14 @@ void Book::modifyLimitOrder(int orderId, int newShares, int newLimit)
             }
         
         order->modifyOrder(newShares, newLimit);
-        auto& limitMap = order->getBuyOrSell() ? limitBuyMap : limitSellMap;
-
-        if (limitMap.find(newLimit) == limitMap.end())
-        {
-            addLimit(newLimit, order->getBuyOrSell());
+        if (newLimit >= 0 && newLimit < kLimitSlots) {
+            const bool buy = order->getBuyOrSell();
+            if (!hasLimit(newLimit, buy))
+            {
+                addLimit(newLimit, buy);
+            }
+            findLimit(newLimit, buy)->append(order);
         }
-        limitMap.at(newLimit)->append(order);
     }
 }
 
@@ -208,8 +364,8 @@ void Book::addStopOrder(int orderId, bool buyOrSell, int shares, int stopPrice)
     
     if (shares != 0)
     {
-        Order* newOrder = new (orderPool_.alloc()) Order(orderId, buyOrSell, shares, 0);
-        orderMap.emplace(orderId, newOrder);
+        Order* newOrder = allocateOrder(orderId, buyOrSell, shares, 0);
+        storeOrder(orderId, newOrder);
 
         if (stopMap.find(stopPrice) == stopMap.end())
         {
@@ -236,8 +392,7 @@ void Book::cancelStopOrder(int orderId)
             }
         deleteFromOrderMap(orderId);
         // stopOrders.erase(order);
-        order->~Order();
-        orderPool_.free(order);
+        deallocateOrder(order);
     }
 }
 
@@ -275,8 +430,8 @@ void Book::addStopLimitOrder(int orderId, bool buyOrSell, int shares, int limitP
     
     if (shares != 0)
     {
-        Order* newOrder = new (orderPool_.alloc()) Order(orderId, buyOrSell, shares, limitPrice);
-        orderMap.emplace(orderId, newOrder);
+        Order* newOrder = allocateOrder(orderId, buyOrSell, shares, limitPrice);
+        storeOrder(orderId, newOrder);
 
         if (stopMap.find(stopPrice) == stopMap.end())
         {
@@ -302,8 +457,7 @@ void Book::cancelStopLimitOrder(int orderId)
             }
         deleteFromOrderMap(orderId);
         // stopLimitOrders.erase(order);
-        order->~Order();
-        orderPool_.free(order);
+        deallocateOrder(order);
     }
 }
 
@@ -346,31 +500,28 @@ int Book::getLimitHeight(Limit* limit) const {
 // Search the order map to find an order
 Order* Book::searchOrderMap(int orderId) const
 {
-    auto it = orderMap.find(orderId);
-    if (it != orderMap.end())
+    Order* order = findOrder(orderId);
+    if (order != nullptr)
     {
-        return it->second;
-    } else
-    {
-        std::cout << "No order number " << orderId << std::endl;
-        return nullptr;
+        return order;
     }
+    std::cout << "No order number " << orderId << std::endl;
+    return nullptr;
 }
 
 // Search the limit maps to find a limit
 Limit* Book::searchLimitMaps(int limitPrice, bool buyOrSell) const
 {
-    auto& limitMap = buyOrSell ? limitBuyMap : limitSellMap;
-
-    auto it = limitMap.find(limitPrice);
-    if (it != limitMap.end())
+    if (limitPrice >= 0 && limitPrice < kLimitSlots)
     {
-        return it->second;
-    } else
-    {
-        std::cout << "No "<< (buyOrSell ? "buy " : "sell ") << "limit at " << limitPrice << std::endl;
-        return nullptr;
+        Limit* limit = findLimit(limitPrice, buyOrSell);
+        if (limit != nullptr)
+        {
+            return limit;
+        }
     }
+    std::cout << "No "<< (buyOrSell ? "buy " : "sell ") << "limit at " << limitPrice << std::endl;
+    return nullptr;
 }
 
 // Search the stop map to find a stop level
@@ -399,8 +550,8 @@ void Book::printOrder(int orderId) const
 
 void Book::printBookEdges() const
 {
-    std::cout << "Buy edge: " << highestBuy->getLimitPrice() 
-    << "Sell edge: " << lowestSell->getLimitPrice() << std::endl;
+    std::cout << "Buy edge: " << highestBuyPtr_->getLimitPrice() 
+    << "Sell edge: " << lowestSellPtr_->getLimitPrice() << std::endl;
 }
 
 // Print out all the limit and stop levels and their liquidity
@@ -411,7 +562,8 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchStopMap(vec[i])->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            std::cerr << "Error in vector\n"; return;
+            std::cerr << "Error: stop buy tree traversal is not in order" << std::endl;
+            return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
@@ -424,7 +576,8 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchStopMap(vec[i])->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            std::cerr << "Error in vector\n"; return;
+            std::cerr << "Error: stop sell tree traversal is not in order" << std::endl;
+            return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
@@ -437,7 +590,8 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchLimitMaps(vec[i], true)->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            std::cerr << "Error in vector\n"; return;
+            std::cerr << "Error: buy tree traversal is not in order" << std::endl;
+            return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
@@ -450,7 +604,8 @@ void Book::printOrderBook() const
     for (size_t i = 0; i < vec.size(); ++i) {
         std::cout << vec[i] << "-" << searchLimitMaps(vec[i], false)->getTotalVolume();
         if (i != 0 && i != vec.size()-1 && vec[i] < vec[i-1]) {
-            std::cerr << "Error in vector\n"; return;
+            std::cerr << "Error: sell tree traversal is not in order" << std::endl;
+            return;
         }
         if (i != vec.size() - 1) {
             std::cout << ", ";
@@ -566,12 +721,15 @@ Order* Book::getRandomOrder(int key, std::mt19937 gen) const
 // Add a new limit to the book
 void Book::addLimit(int limitPrice, bool buyOrSell)
 {
-    auto& limitMap = buyOrSell ? limitBuyMap : limitSellMap;
-    auto& tree = buyOrSell ? buyTree : sellTree;
-    auto& bookEdge = buyOrSell ? highestBuy : lowestSell;
+    if (limitPrice < 0 || limitPrice >= kLimitSlots) {
+        return;
+    }
 
-    Limit* newLimit = new (limitPool_.alloc()) Limit(limitPrice, buyOrSell);
-    limitMap.emplace(limitPrice, newLimit);
+    auto& tree = buyOrSell ? buyTree : sellTree;
+    auto& bookEdge = buyOrSell ? highestBuyPtr_ : lowestSellPtr_;
+
+    Limit* newLimit = allocateLimit(limitPrice, buyOrSell);
+    setLimit(limitPrice, buyOrSell, newLimit);
 
     if (tree == nullptr)
     {
@@ -590,7 +748,7 @@ void Book::addStop(int stopPrice, bool buyOrSell)
     auto& tree = buyOrSell ? stopBuyTree : stopSellTree;
     auto& bookEdge = buyOrSell ? lowestStopBuy : highestStopSell;
 
-    Limit* newStop = new (limitPool_.alloc()) Limit(stopPrice, buyOrSell);
+    Limit* newStop = allocateLimit(stopPrice, buyOrSell);
     stopMap.emplace(stopPrice, newStop);
 
     if (tree == nullptr)
@@ -650,15 +808,15 @@ void Book::updateBookEdgeInsert(Limit* newLimit)
 {
     if (newLimit->getBuyOrSell())
     {
-        if (newLimit->getLimitPrice() > highestBuy->getLimitPrice())
+        if (newLimit->getLimitPrice() > highestBuyPtr_->getLimitPrice())
         {
-            highestBuy = newLimit;
+            highestBuyPtr_ = newLimit;
         }
     } else
     {
-        if (newLimit->getLimitPrice() < lowestSell->getLimitPrice())
+        if (newLimit->getLimitPrice() < lowestSellPtr_->getLimitPrice())
         {
-            lowestSell = newLimit;
+            lowestSellPtr_ = newLimit;
         }
     }
 }
@@ -684,7 +842,7 @@ void Book::updateStopBookEdgeInsert(Limit* newStop)
 // Update the edge of the book if current edge of the book is emptied
 void Book::updateBookEdgeRemove(Limit* limit)
 {
-    auto& bookEdge = limit->getBuyOrSell() ? highestBuy : lowestSell;
+    auto& bookEdge = limit->getBuyOrSell() ? highestBuyPtr_ : lowestSellPtr_;
     auto& tree = limit->getBuyOrSell() ? buyTree : sellTree;
 
     if (limit == bookEdge)
@@ -794,8 +952,7 @@ void Book::deleteLimit(Limit* limit)
 
     Limit* parent = limit->getParent();
     int limitPrice = limit->getLimitPrice();
-    limit->~Limit();
-    limitPool_.free(limit);
+    deallocateLimit(limit);
     while (parent != nullptr)
     {
         parent = balance(parent);
@@ -821,8 +978,7 @@ void Book::deleteStopLevel(Limit* stopLevel)
 
     Limit* parent = stopLevel->getParent();
     int stopPrice = stopLevel->getLimitPrice();
-    stopLevel->~Limit();
-    limitPool_.free(stopLevel);
+    deallocateLimit(stopLevel);
     while (parent != nullptr)
     {
         parent = balanceStop(parent);
@@ -842,14 +998,15 @@ void Book::deleteStopLevel(Limit* stopLevel)
 // Delete an order from the order map
 void Book::deleteFromOrderMap(int orderId)
 {
-    orderMap.erase(orderId);
+    clearOrder(orderId);
 }
 
 // Delete a limit from the limit maps
 void Book::deleteFromLimitMaps(int limitPrice, bool buyOrSell)
 {
-    auto& limitMap = buyOrSell ? limitBuyMap : limitSellMap;
-    limitMap.erase(limitPrice);
+    if (limitPrice >= 0 && limitPrice < kLimitSlots) {
+        clearLimit(limitPrice, buyOrSell);
+    }
 }
 
 // Delete a stop level from the stop map
@@ -864,28 +1021,28 @@ int Book::limitOrderAsMarketOrder(int orderId, bool buyOrSell, int shares, int l
 {
     if (buyOrSell)
     {
-        while (lowestSell != nullptr && shares != 0 && lowestSell->getLimitPrice() <= limitPrice)
+        while (lowestSellPtr_ != nullptr && shares != 0 && lowestSellPtr_->getLimitPrice() <= limitPrice)
         {
-            if (shares <= lowestSell->getTotalVolume())
+            if (shares <= lowestSellPtr_->getTotalVolume())
             {
                 marketOrderHelper(orderId, buyOrSell, shares);
                 return 0;
             } else {
-                shares -= lowestSell->getTotalVolume();
-                marketOrderHelper(orderId, buyOrSell, lowestSell->getTotalVolume());
+                shares -= lowestSellPtr_->getTotalVolume();
+                marketOrderHelper(orderId, buyOrSell, lowestSellPtr_->getTotalVolume());
             }
         }
         return shares;
     } else {
-        while (highestBuy != nullptr && shares != 0 && highestBuy->getLimitPrice() >= limitPrice)
+        while (highestBuyPtr_ != nullptr && shares != 0 && highestBuyPtr_->getLimitPrice() >= limitPrice)
         {
-            if (shares <= highestBuy->getTotalVolume())
+            if (shares <= highestBuyPtr_->getTotalVolume())
             {
                 marketOrderHelper(orderId, buyOrSell, shares);
                 return 0;
             } else {
-                shares -= highestBuy->getTotalVolume();
-                marketOrderHelper(orderId, buyOrSell, highestBuy->getTotalVolume());
+                shares -= highestBuyPtr_->getTotalVolume();
+                marketOrderHelper(orderId, buyOrSell, highestBuyPtr_->getTotalVolume());
             }
         }
         return shares;
@@ -896,11 +1053,11 @@ int Book::limitOrderAsMarketOrder(int orderId, bool buyOrSell, int shares, int l
 // execute it as if it were a market order
 int Book::stopOrderAsMarketOrder(int orderId, bool buyOrSell, int shares, int stopPrice)
 {
-    if (buyOrSell && lowestSell != nullptr && stopPrice <= lowestSell->getLimitPrice())
+    if (buyOrSell && lowestSellPtr_ != nullptr && stopPrice <= lowestSellPtr_->getLimitPrice())
     {
         marketOrder(orderId, true, shares);
         return 0;
-    } else if (!buyOrSell && highestBuy != nullptr && stopPrice >= highestBuy->getLimitPrice())
+    } else if (!buyOrSell && highestBuyPtr_ != nullptr && stopPrice >= highestBuyPtr_->getLimitPrice())
     {
         marketOrder(orderId, false, shares);
         return 0;
@@ -918,34 +1075,32 @@ int Book::existingOrderAsMarketOrder(Order* headOrder, bool buyOrSell)
     
     if (buyOrSell)
     {
-        while (lowestSell != nullptr && lowestSell->getLimitPrice() <= limitPrice)
+        while (lowestSellPtr_ != nullptr && lowestSellPtr_->getLimitPrice() <= limitPrice)
         {
-            if (shares <= lowestSell->getTotalVolume())
+            if (shares <= lowestSellPtr_->getTotalVolume())
             {
                 deleteFromOrderMap(orderId);
-                headOrder->~Order();
-                orderPool_.free(headOrder);
+                deallocateOrder(headOrder);
                 marketOrderHelper(orderId, buyOrSell, shares);
                 return 0;
             } else {
-                shares -= lowestSell->getTotalVolume();
-                marketOrderHelper(orderId, buyOrSell, lowestSell->getTotalVolume());
+                shares -= lowestSellPtr_->getTotalVolume();
+                marketOrderHelper(orderId, buyOrSell, lowestSellPtr_->getTotalVolume());
             }
         }
         return shares;
     } else {
-        while (highestBuy != nullptr && highestBuy->getLimitPrice() >= limitPrice)
+        while (highestBuyPtr_ != nullptr && highestBuyPtr_->getLimitPrice() >= limitPrice)
         {
-            if (shares <= highestBuy->getTotalVolume())
+            if (shares <= highestBuyPtr_->getTotalVolume())
             {
                 deleteFromOrderMap(orderId);
-                headOrder->~Order();
-                orderPool_.free(headOrder);
+                deallocateOrder(headOrder);
                 marketOrderHelper(orderId, buyOrSell, shares);
                 return 0;
             } else {
-                shares -= highestBuy->getTotalVolume();
-                marketOrderHelper(orderId, buyOrSell, highestBuy->getTotalVolume());
+                shares -= highestBuyPtr_->getTotalVolume();
+                marketOrderHelper(orderId, buyOrSell, highestBuyPtr_->getTotalVolume());
             }
         }
         return shares;
@@ -956,11 +1111,11 @@ int Book::existingOrderAsMarketOrder(Order* headOrder, bool buyOrSell)
 // execute it as if it were a limit order
 int Book::stopLimitOrderAsLimitOrder(int orderId, bool buyOrSell, int shares, int limitPrice, int stopPrice)
 {
-    if (buyOrSell && lowestSell != nullptr && stopPrice <= lowestSell->getLimitPrice())
+    if (buyOrSell && lowestSellPtr_ != nullptr && stopPrice <= lowestSellPtr_->getLimitPrice())
     {
         addLimitOrder(orderId, true, shares, limitPrice);
         return 0;
-    } else if (!buyOrSell && highestBuy != nullptr && stopPrice >= highestBuy->getLimitPrice())
+    } else if (!buyOrSell && highestBuyPtr_ != nullptr && stopPrice >= highestBuyPtr_->getLimitPrice())
     {
         addLimitOrder(orderId, false, shares, limitPrice);
         return 0;
@@ -975,7 +1130,7 @@ void Book::executeStopOrders(bool buyOrSell)
     {
         // Execute any buy stop market orders
         // If the book is empty and can't complete stop market order then it just doesn't execute and is forgotten.
-        while (lowestStopBuy != nullptr && (lowestSell == nullptr || lowestStopBuy->getLimitPrice() <= lowestSell->getLimitPrice()))
+        while (lowestStopBuy != nullptr && (lowestSellPtr_ == nullptr || lowestStopBuy->getLimitPrice() <= lowestSellPtr_->getLimitPrice()))
         {
             Order* headOrder = lowestStopBuy->getHeadOrder();
             if (headOrder->getLimit() == 0)
@@ -988,8 +1143,7 @@ void Book::executeStopOrders(bool buyOrSell)
                 }
                 deleteFromOrderMap(headOrder->getOrderId());
                 // stopOrders.erase(headOrder);
-                headOrder->~Order();
-                orderPool_.free(headOrder);
+                deallocateOrder(headOrder);
                 marketOrderHelper(0, true, shares);
             } else {
                 // stopLimitOrders.erase(headOrder);
@@ -999,7 +1153,7 @@ void Book::executeStopOrders(bool buyOrSell)
     } else {
         // Execute any sell stop market orders
         // If the book is empty and can't complete stop market order then it just doesn't execute and is forgotten.
-        while (highestStopSell != nullptr && (highestBuy == nullptr || highestStopSell->getLimitPrice() >= highestBuy->getLimitPrice()))
+        while (highestStopSell != nullptr && (highestBuyPtr_ == nullptr || highestStopSell->getLimitPrice() >= highestBuyPtr_->getLimitPrice()))
         {
             Order* headOrder = highestStopSell->getHeadOrder();
             if (headOrder->getLimit() == 0)
@@ -1012,8 +1166,7 @@ void Book::executeStopOrders(bool buyOrSell)
                 }
                 deleteFromOrderMap(headOrder->getOrderId());
                 // stopOrders.erase(headOrder);
-                headOrder->~Order();
-                orderPool_.free(headOrder);
+                deallocateOrder(headOrder);
                 marketOrderHelper(0, false, shares);
             } else {
                 // stopLimitOrders.erase(headOrder);
@@ -1039,13 +1192,15 @@ void Book::stopLimitOrderToLimitOrder(Order* headOrder, bool buyOrSell)
     if (shares != 0)
     {
         headOrder->setShares(shares);
-        auto& limitMap = buyOrSell ? limitBuyMap : limitSellMap;
+        const int limitPrice = headOrder->getLimit();
 
-        if (limitMap.find(headOrder->getLimit()) == limitMap.end())
-        {
-            addLimit(headOrder->getLimit(), buyOrSell);
+        if (limitPrice >= 0 && limitPrice < kLimitSlots) {
+            if (!hasLimit(limitPrice, buyOrSell))
+            {
+                addLimit(limitPrice, buyOrSell);
+            }
+            findLimit(limitPrice, buyOrSell)->append(headOrder);
         }
-        limitMap.at(headOrder->getLimit())->append(headOrder);
         // limitOrders.insert(headOrder);
     }
 }
@@ -1054,12 +1209,25 @@ void Book::stopLimitOrderToLimitOrder(Order* headOrder, bool buyOrSell)
 // If the book is empty and can't complete market order then market order just doesn't execute and is forgotten
 void Book::marketOrderHelper(int orderId, bool buyOrSell, int shares)
 {
-    auto& bookEdge = buyOrSell ? lowestSell : highestBuy;
+    auto& bookEdge = buyOrSell ? lowestSellPtr_ : highestBuyPtr_;
 
     while (bookEdge != nullptr && bookEdge->getHeadOrder()->getShares() <= shares)
     {
         Order* headOrder = bookEdge->getHeadOrder();
-        shares -= headOrder->getShares();
+        const int tradedShares = headOrder->getShares();
+        shares -= tradedShares;
+
+        if (logger_ != nullptr) {
+            TradeEvent ev{};
+            ev.ts_ns = rdtsc();  // not true ns, but monotonic cycles; CSV consumer can scale.
+            ev.seq = static_cast<uint64_t>(executedOrdersCount);
+            ev.price = static_cast<uint32_t>(headOrder->getLimit());
+            ev.shares = static_cast<uint32_t>(tradedShares);
+            ev.side = buyOrSell ? 1u : 0u;
+            ev.action = 0u;  // 0 = full fill
+            logger_->log(ev);
+        }
+
         headOrder->execute();
         if (bookEdge->getSize() == 0)
         {
@@ -1067,13 +1235,26 @@ void Book::marketOrderHelper(int orderId, bool buyOrSell, int shares)
         }
         deleteFromOrderMap(headOrder->getOrderId());
         // limitOrders.erase(headOrder);
-        headOrder->~Order();
-        orderPool_.free(headOrder);
+        deallocateOrder(headOrder);
         executedOrdersCount += 1;
     }
     if (bookEdge != nullptr && shares != 0)
     {
-        bookEdge->getHeadOrder()->partiallyFillOrder(shares);
+        const int tradedShares = shares;
+        Order* headOrder = bookEdge->getHeadOrder();
+
+        if (logger_ != nullptr) {
+            TradeEvent ev{};
+            ev.ts_ns = rdtsc();
+            ev.seq = static_cast<uint64_t>(executedOrdersCount);
+            ev.price = static_cast<uint32_t>(headOrder->getLimit());
+            ev.shares = static_cast<uint32_t>(tradedShares);
+            ev.side = buyOrSell ? 1u : 0u;
+            ev.action = 1u;  // 1 = partial fill
+            logger_->log(ev);
+        }
+
+        headOrder->partiallyFillOrder(tradedShares);
         executedOrdersCount += 1;
     }
 }
@@ -1238,3 +1419,7 @@ Limit* Book::balanceStop(Limit* limit) {
 
 template void Book::matchOrder<true>(int id, int shares, int limitPrice);
 template void Book::matchOrder<false>(int id, int shares, int limitPrice);
+
+#ifdef USE_STL_ALLOC
+} // namespace baseline
+#endif

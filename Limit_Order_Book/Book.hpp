@@ -2,34 +2,67 @@
 #define BOOK_HPP
 
 #include <new>
+#ifndef USE_STL_ALLOC
 #include "mempool.hpp"
+#include <array>
+#endif
 #include <unordered_map>
 #include <vector>
 #include <random>
 #include <unordered_set>
+
+#include "trade_logger.hpp"
+
+#ifdef USE_STL_ALLOC
+namespace baseline {
+#endif
 
 class Limit;
 class Order;
 
 class Book {
 private:
+#ifndef USE_STL_ALLOC
     lob::SlabPool<Order> orderPool_;
     lob::SlabPool<Limit> limitPool_;
+#endif
 
     Limit *buyTree;
     Limit *sellTree;
-    Limit *lowestSell;
-    Limit *highestBuy;
+    alignas(64) Limit *highestBuyPtr_;
+    alignas(64) Limit *lowestSellPtr_;
 
     Limit *stopBuyTree;
     Limit *stopSellTree;
     Limit *highestStopSell;
     Limit *lowestStopBuy;
 
+#ifndef USE_STL_ALLOC
+    std::array<Limit*, 1024> buyLimitArr_{};
+    std::array<Limit*, 1024> sellLimitArr_{};
+    std::array<Order*, 1 << 17> orderArr_{};
+#else
     std::unordered_map<int, Order*> orderMap;
     std::unordered_map<int, Limit*> limitBuyMap;
     std::unordered_map<int, Limit*> limitSellMap;
+#endif
     std::unordered_map<int, Limit*> stopMap;
+
+    TradeLogger* logger_ = nullptr;
+
+    Order* allocateOrder(int id, bool buyOrSell, int shares, int limitPrice);
+    void deallocateOrder(Order* order);
+    Limit* allocateLimit(int limitPrice, bool buyOrSell);
+    void deallocateLimit(Limit* limit);
+
+    void storeOrder(int orderId, Order* order);
+    Order* findOrder(int orderId) const;
+    void clearOrder(int orderId);
+
+    Limit* findLimit(int limitPrice, bool buyOrSell) const;
+    bool hasLimit(int limitPrice, bool buyOrSell) const;
+    void setLimit(int limitPrice, bool buyOrSell, Limit* limit);
+    void clearLimit(int limitPrice, bool buyOrSell);
 
     void addLimit(int limitPrice, bool buyOrSell);
     void addStop(int stopPrice, bool buyOrSell);
@@ -70,7 +103,7 @@ private:
     template <bool IsBuy> void matchOrder(int id, int shares, int limitPrice);
 
 public:
-    Book();
+    explicit Book(TradeLogger* logger = nullptr);
     ~Book();
 
     // Counts used in order book perforamce visualisations
@@ -120,5 +153,20 @@ public:
     std::unordered_set<Order*> stopOrders;
     std::unordered_set<Order*> stopLimitOrders;
 };
+
+#ifdef USE_STL_ALLOC
+}  // namespace baseline
+#endif
+
+#ifdef USE_STL_ALLOC
+namespace baseline {
+class Book;
+}
+using BookBaseline = baseline::Book;
+#else
+// When compiling the main pooled version, alias BookBaseline to regular Book
+// so that files like baseline_adapter can always find a valid class type.
+using BookBaseline = Book;
+#endif
 
 #endif

@@ -1,8 +1,9 @@
 build/
-bin/
-googletest/
-.vscode/
-*.o
-*.txt
-*.csv
-*.txt
+build_profile/
+data/
+perf.data
+perf.data.old
+generate_itch
+itch_parser
+docs/hist.csv
+docs/bench.csv.stl

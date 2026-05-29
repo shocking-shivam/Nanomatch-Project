@@ -1,19 +1,29 @@
 #ifndef LIMIT_HPP
 #define LIMIT_HPP
 
+#include <cstddef>
+
+#ifdef USE_STL_ALLOC
+namespace baseline {
+#endif
+
 class Order;
 
-class Limit {
+struct alignas(64) Limit {
 private:
-    int limitPrice;
+    Order* headOrder;
+    Order* tailOrder;
     int size;
     int totalVolume;
+    int limitPrice;
+    int _pad0;
     bool buyOrSell;
-    Limit *parent;
-    Limit *leftChild;
-    Limit *rightChild;
-    Order *headOrder;
-    Order *tailOrder;
+    char _padLine0[64 - 33];
+
+    alignas(64) Limit* parent;
+    Limit* leftChild;
+    Limit* rightChild;
+    char _padLine1[40];
 
     friend class Order;
 public:
@@ -39,5 +49,13 @@ public:
     void printBackward() const;
     void print() const;
 };
+
+static_assert(sizeof(Limit) == 128, "Limit must be exactly 128 bytes");
+// static_assert(offsetof(Limit, headOrder) == 0, "headOrder must start at offset 0");
+// static_assert(offsetof(Limit, parent) == 64, "parent must start at offset 64");
+
+#ifdef USE_STL_ALLOC
+} // namespace baseline
+#endif
 
 #endif

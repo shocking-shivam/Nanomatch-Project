@@ -1,6 +1,10 @@
 #ifndef ORDER_HPP
 #define ORDER_HPP
 
+#ifdef USE_STL_ALLOC
+namespace baseline {
+#endif
+
 class Limit;
 
 class Order {
@@ -33,5 +37,9 @@ public:
 };
 
 static_assert(sizeof(Order) <= 64, "Order exceeds cache line");
+
+#ifdef USE_STL_ALLOC
+} // namespace baseline
+#endif
 
 #endif

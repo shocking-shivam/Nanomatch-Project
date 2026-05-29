@@ -2,10 +2,15 @@
 #include "Order.hpp"
 #include <iostream>
 
+#ifdef USE_STL_ALLOC
+namespace baseline {
+#endif
+
 Limit::Limit(int _limitPrice, bool _buyOrSell, int _size, int _totalVolume)
-    : limitPrice(_limitPrice), buyOrSell(_buyOrSell), size(_size), totalVolume(_totalVolume),
-    parent(nullptr), leftChild(nullptr), rightChild(nullptr),
-    headOrder(nullptr), tailOrder(nullptr) {}
+    : headOrder(nullptr), tailOrder(nullptr),
+      size(_size), totalVolume(_totalVolume), limitPrice(_limitPrice),
+      _pad0(0), buyOrSell(_buyOrSell),
+      parent(nullptr), leftChild(nullptr), rightChild(nullptr) {}
 
 Limit::~Limit()
 {
@@ -198,3 +203,7 @@ void Limit::print() const
     << ", Limit Size: " << size 
     << std::endl;
 }
+
+#ifdef USE_STL_ALLOC
+} // namespace baseline
+#endif
